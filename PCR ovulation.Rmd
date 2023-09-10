@@ -1,0 +1,50 @@
+---
+title: "ПЦР"
+author: "Ivan"
+date: "`r Sys.Date()`"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+library(readxl)
+library(ggplot2)
+library(car)
+library(multcomp)
+```
+
+## R Markdown
+
+```{r cox2}
+cox2 <- read_xlsx('/Users/ivanlebedev/Downloads/Лаборатория/Индукция овуляции 2023/ПЦР индукция овуляции.06.23.xlsx', sheet = 5, col_names = TRUE)
+str(cox2)
+cox2$Group<- factor(cox2$Group)
+cox2$N<- factor(cox2$N)
+cox2$Gene<- factor(cox2$Gene)
+View(cox2)
+
+A <- lm(RQ~Group,data=cox2)
+MyD <- data.frame(Group = factor(levels(cox2$Group),
+                                 levels = levels(cox2$Group)))
+X <- model.matrix( ~ Group, data = MyD)
+betas <- coef(A)
+MyD$fit <- X  %*% betas
+MyD$se <- sqrt(diag(X %*% vcov(A) %*% t(X)))
+t_crit <- qt(p = 0.975 , df = nrow(cox2) - length(coef(A)))
+MyD$lwr <- MyD$fit -  t_crit * MyD$se
+MyD$upr <- MyD$fit + t_crit * MyD$se
+A_anova <- Anova(A)
+A_anova
+A_posthoc <- glht(A, linfct = mcp(Group = "Tukey"))
+summary(A_posthoc)
+```
+
+## Including Plots
+
+```{r plot, echo=FALSE}
+gg_bars1 <- ggplot(data = MyD , aes(x = Group , y = fit)) +
+  geom_col(aes(fill = Group), width = 0.5) +
+  geom_errorbar(aes(ymin = MyD$lwr, ymax = MyD$upr ), width = 0.1)+ labs(x = "Group", y = "RQ", title = "Cox2")
+gg_bars1
+```
+
