@@ -41,10 +41,10 @@ summary(A_posthoc)
 
 ## Including Plots
 
-```{r plot, echo=FALSE, error = FALSE, warning = FALSE}
-gg_bars1 <- ggplot(data = MyD , aes(x = Group , y = fit)) +
+```{r bar plot, echo=FALSE, error = FALSE, warning = FALSE}
+gg_bars <- ggplot(data = MyD , aes(x = Group , y = fit)) +
   geom_col(aes(fill = Group), width = 0.5) +
   geom_errorbar(aes(ymin = MyD$lwr, ymax = MyD$upr ), width = 0.1)+ labs(x = "Group", y = "RQ", title = "Cox2")
-gg_bars1
+gg_bars
 ```
 
