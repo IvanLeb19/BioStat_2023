@@ -1,0 +1,416 @@
+---
+title: "automatization_notebook_02"
+output: word_document
+date: "`r Sys.Date()`"
+---
+
+```{r setup, include=FALSE}
+
+knitr::opts_chunk$set(echo = TRUE)
+library(tidyverse)
+library(dplyr)
+library(stringi)
+library(tidyr)
+library(ggbeeswarm)
+library(RColorBrewer)
+library(rstatix)
+library(corrplot)
+
+```
+
+# Чтение данных
+
+В вашем варианте нужно использовать датасет food.
+
+```{r}
+
+food <- read.csv('data/raw/food.csv')
+
+```
+
+# Выведите общее описание данных
+
+```{r}
+
+summary(food)
+str(food)
+
+```
+
+# Очистка данных
+
+1)  Уберите переменные, в которых пропущенных значений больше 20% или уберите субъектов со слишком большим количеством пропущенных значений. Или совместите оба варианта. Напишите обоснование, почему вы выбрали тот или иной вариант:
+
+**Обоснование**:
+В данных нет пропущенных значений в виде NA или каком-либо другом не числовом виде, пропущенные значения могут быть закодированы с помощью 0, однако, поскольку датасет представляет собой ссодержание различных соединений в продуктах, то 0 несут также смысл отсутствия соединения в продукте питания, то есть 0 несут информацию и их нельзя просто убрать. Можно убрать случаи или переменные, где слишком много 0, но это может привести к потере переменной, в которой содержатся данные о соединении встречаемом в специфических продуктах (редком соединении), случаи с большим количеством 0 тоже могут нести информацию, например логично, что в сахаре соединений, кроме сахаров не так много, то есть по многим переменным 0. Таким образом, чтобы не потерять информацию от 0 чистка данных не проводилась. Однако не получится посчитать адекватную статистику по перменным, а также визуализировать данные с большим количеством 0, в связи с чем мной было принято решение убрать переменные, в которых пропущенных значений больше 20%.
+
+2)  Переименуйте переменные в человекочитаемый вид (что делать с пробелами в названиях?);
+
+3)  В соответствии с описанием данных приведите переменные к нужному типу (numeric или factor);
+
+4)  Отсортируйте данные по возрасту по убыванию;
+
+5)  Сохраните в файл outliers.csv субъектов, которые являются выбросами (например, по правилу трёх сигм) --- это необязательное задание со звёздочкой;
+
+6)  Отфильтруйте датасет так, чтобы остались только Rice и Cookie (переменная Category и есть группирующая);
+
+7)  Присвойте получившийся датасет переменной "cleaned_data".
+
+```{r}
+
+# Переименовываем переменные
+
+colnames(food) <- food %>% 
+  names() %>% 
+  stri_replace_all_regex("Data.","") %>% 
+  stri_replace_all_regex("Fat.","") %>% 
+  stri_replace_all_regex("Major.Minerals.","") %>% 
+  stri_replace_all_regex("Vitamins.","") %>% 
+  stri_replace_all_regex("\\.\\.\\."," and ") %>% 
+  stri_replace_all_regex("\\."," ")
+
+# Проверка на NA
+
+sum(is.na(food))
+
+
+g <- c()
+for (i in 1:ncol(food)){
+  g <- c(g,sum(food[,i] == 0))
+}
+
+print(g)
+sum(g==0)
+perem <- g>nrow(food)*0.2
+out <- data.frame(perem = perem, nazv = names(food))
+
+food <- food %>%
+  dplyr::select(-`Alpha Carotene`, -`Beta Carotene`, -`Beta Cryptoxanthin`, -`Beta Cryptoxanthin`, -Cholesterol, -Fiber, -`Lutein and Zeaxanthin`, -Lycopene, -Retinol, -`Vitamin B12`, -`Vitamin C`)
+
+# Приводим к нужному типу
+
+food$Category <- food$Category %>% 
+  as.factor()
+food$`Nutrient Bank Number` <- food$`Nutrient Bank Number` %>% 
+  as.factor()
+
+# Сортируем и фильтруем данные
+
+cleaned_data <- food %>%  
+  arrange(desc(Carbohydrate)) %>% 
+  group_by(Category) %>% 
+  filter(Category %in% c("Rice","Cookie"))
+
+# Сохраняем аутлаеров
+
+food %>% 
+  arrange(desc(Carbohydrate)) %>%
+  filter(!between(Carbohydrate,mean(food$Carbohydrate)-3*sd(food$Carbohydrate), mean(food$Carbohydrate)+3*sd(food$Carbohydrate))) %>% 
+  write.csv(file = "data/raw/outliers.csv")
+
+```
+
+
+```{r}
+# Сколько осталось переменных?
+
+cleaned_data %>% ncol()
+
+```
+
+# Сколько осталось случаев?
+
+```{r}
+
+cleaned_data %>% nrow()
+
+```
+
+# Есть ли в данных идентичные строки?
+
+```{r}
+
+#Проверка циклом по строкам
+k <- c()
+j <- c()
+for (i in 1:nrow(cleaned_data)){ 
+  if (identical(cleaned_data[i,], cleaned_data[i+1,]) == T) {
+  k <- c(k,i)
+  j <- c(j,i+1)
+  }else{
+    k <- c(k,"No")
+    j <- c(j,"No")
+  }
+}
+ident <- data.frame(k= k, j = j)
+
+```
+
+# Сколько всего переменных с пропущенными значениями в данных и сколько пропущенных точек в каждой такой переменной?
+
+```{r}
+
+# Количество пропущенных значений в датасете, если 0 не считать таковыми 
+
+cleaned_data %>% 
+  is.na() %>% 
+  sum()
+
+# Количество пропущенных значений в датасете, если 0 считать таковыми 
+
+g <- c()
+for (i in 1:ncol(cleaned_data)){ 
+  g <- c(g,sum(cleaned_data[,i] == 0))
+}
+
+# Количество 0 в каждой переменной и количество переменных с 0
+
+  print(g)
+  sum(g==0)
+  
+```
+
+# Описательные статистики
+
+## Количественные переменные
+
+1)  Рассчитайте для всех количественных переменных для каждой группы (Category):
+
+1.1) Количество значений;
+
+1.2) Количество пропущенных значений;
+
+1.3) Среднее;
+
+1.4) Медиану;
+
+1.5) Стандартное отклонение;
+
+1.6) 25% квантиль и 75% квантиль;
+
+1.7) Интерквартильный размах;
+
+1.8) Минимум;
+
+1.9) Максимум;
+
+1.10) 95% ДИ для среднего - задание со звёздочкой.
+
+```{r}
+
+statistics <- list(
+      `Количество (есть данные)` = ~sum(!is.na(.x)) %>% as.character(),
+      `Нет данных` = ~sum(is.na(.x)) %>% as.character(),
+      `Ср. знач.` = ~ifelse(sum(!is.na(.x)) == 0, "Н/П*", mean(.x, na.rm = TRUE) %>% round(2)) %>% as.character(),
+      `Медиана` = ~ifelse(sum(!is.na(.x)) == 0, "Н/П*", median(.x, na.rm = TRUE) %>% round(2)) %>% as.character(),
+      `Станд. отклон.` = ~ifelse(sum(!is.na(.x)) < 3, "Н/П*", sd(.x, na.rm = TRUE) %>% round(2)) %>% as.character(),
+      `Q1` = ~ifelse(sum(!is.na(.x)) == 0, "Н/П*", quantile(.x, 0.25, na.rm = TRUE) %>% round(2)) %>% as.character(), 
+      `Q3` = ~ifelse(sum(!is.na(.x)) == 0, "Н/П*", quantile(.x, 0.75, na.rm = TRUE) %>% round(2)) %>% as.character(),
+      `IQR` = ~ifelse(sum(!is.na(.x)) == 0, "Н/П*", IQR(.x, na.rm = TRUE) %>% round(2)) %>% as.character(),
+      `мин.` = ~ifelse(sum(!is.na(.x)) == 0, "Н/П*", min(.x, na.rm = TRUE) %>% round(2)) %>% as.character(),
+      `макс.` = ~ifelse(sum(!is.na(.x)) == 0, "Н/П*", max(.x, na.rm = TRUE) %>% round(2)) %>% as.character(),
+      `95% ДИ для среднего` = ~ifelse(sum(!is.na(.x)) == 0, "Н/П*", paste0((mean(.x, na.rm = TRUE)-quantile(.x, 0.975, df=length(.x)-1, na.rm = TRUE)*(sd(.x, na.rm = TRUE)/sqrt(length(.x)))) %>% round(2), " - ", (mean(.x, na.rm = TRUE)+quantile(.x, 0.975, df=length(.x)-1, na.rm = TRUE)*(sd(.x, na.rm = TRUE)/sqrt(length(.x)))) %>% round(2))) %>% as.character()
+)
+
+cleaned_data %>%
+  dplyr::select ('Category', where(is.numeric)) %>%
+  group_by (`Category`) %>% 
+  summarise(across(where(is.numeric), statistics)) %>%
+  pivot_longer(!Category) %>% 
+  separate(name, into = c("Переменная","статистика"), sep = "_") %>% 
+  rename(`Значение` = value)
+
+```
+
+## Категориальные переменные
+
+1)  Рассчитайте для всех категориальных переменных для каждой группы (Category):
+
+1.1) Абсолютное количество;
+
+1.2) Относительное количество внутри группы;
+
+1.3) 95% ДИ для доли внутри группы - задание со звёздочкой.
+
+```{r}
+cleaned_data %>% 
+  count ('Category') %>%
+  mutate('Абсолютное количество' = sum(n)) %>% 
+  ungroup() %>% 
+  mutate('Относительное количество' = (n/sum(n)) %>% round(2)) %>% 
+  mutate('95% ДИ для среднего' = paste0(((n/sum(n))-qnorm(0.975)*sqrt((n/sum(n))*(1-(n/sum(n)))/sum(n))) %>% round(2), " - ", ((n/sum(n))+qnorm(0.975)*sqrt((n/sum(n))*(1-(n/sum(n)))/sum(n))) %>% round(2)) %>% as.character()
+)
+```
+
+# Визуализация
+
+## Количественные переменные
+
+1)  Для каждой количественной переменной сделайте боксплоты по группам. Расположите их либо на отдельных рисунках, либо на одном, но читаемо;
+
+2)  Наложите на боксплоты beeplots - задание со звёздочкой.
+
+3)  Раскрасьте боксплоты с помощью библиотеки RColorBrewer.
+
+```{r}
+
+cleaned_data %>%
+  dplyr::select (`Category`, where(is.numeric)) %>%
+  group_by (`Category`) %>% 
+  pivot_longer(!Category) %>%
+  ggplot(aes(Category, value)) +
+  facet_wrap(~ name, scales = "free") +
+  geom_boxplot(aes(fill=Category)) + 
+  scale_color_brewer(palette="Dark2") + 
+  geom_beeswarm()
+
+```
+
+## Категориальные переменные
+
+1)  Сделайте подходящие визуализации категориальных переменных. Обоснуйте, почему выбрали именно этот тип.
+
+Поскольку в датасете только одна категориальная переменная, то можно поссмотреть распределение по ее факторам, для этого я решил выбрать столбчатую диограмму. График отражает соотношение по количесству продуктов в категории "Rice" и "Cookie".
+
+```{r}
+
+cleaned_data %>% 
+  count ('Category') %>%
+  mutate('Абсолютное количество' = sum(n)) %>% 
+  ggplot( aes(x = Category, y = `Абсолютное количество`, fill= Category )) +
+  geom_col() + 
+  theme_bw() + 
+  scale_color_brewer(palette="Dark2")
+
+```
+
+# Статистические оценки
+
+## Проверка на нормальность
+
+1)  Оцените каждую переменную на соответствие нормальному распределению с помощью теста Шапиро-Уилка. Какие из переменных являются нормальными и как как вы это поняли?
+
+По p.value теста оцениваем нормальность распределения, при p<0.05 отвергаем нулевую гипотезу и делаем вывод, что распределение не нормальное. В данном случае нормальное распредление по результатом теста Шапиро-Уилка только у переменной Carbohydrate, Total Lipid, Sodium.
+
+```{r}
+
+shapiro <- list(`P value` = ~shapiro.test(.x)$p.value %>% round(3))
+
+shapir <- cleaned_data %>% 
+  dplyr::select (Category, where(is.numeric)) %>% 
+  group_by(Category) %>%
+  summarise_all(shapiro) %>% 
+  pivot_longer(!Category) %>% 
+  separate(name, into = c("Переменная","shapiro"), sep = "_") %>% 
+  rename(`p value` = value)
+
+```
+
+2)  Постройте для каждой количественной переменной QQ-плот. Отличаются ли выводы от теста Шапиро-Уилка? Какой метод вы бы предпочли и почему?
+
+На мой взгляд выводы отличаются, распределения Carbohydrate и Total Lipid достаточно сильно отличаются от нормального, тогда как распределения других переменных, которые можно было бы аппроксимировать с помощью нормального распределения, по тесту Шапиро-Уилка не нормального распределения. Я бы предпочел в связи с этим использовать QQ-плот.
+
+```{r}
+
+cleaned_data %>%
+  dplyr::select (`Category`, where(is.numeric)) %>%
+  group_by (`Category`) %>% 
+  pivot_longer(!Category) %>%
+  ggplot(aes(sample = value)) +
+  facet_wrap(~ name, scales = "free") +
+  stat_qq() +
+  stat_qq_line()
+
+```
+
+3)  Ниже напишите, какие ещё методы проверки на нормальность вы знаете и какие у них есть ограничения.
+
+Критерий Шапиро—Уилка
+Более подходит для небольших выборок (8<n<50), возможна асимметрия распределения
+
+Критерий Андерсона—Дарлинга
+Случайность и независимость выборок, возможна асимметрия распределения
+
+Критерий Колмогорова—Смирнова (с поправкой Лиллиефорса)
+Подходит для больших выборок с симметричным распределением. Условия — случайность и независимость выборок, объем выборки более 50
+
+## Сравнение групп
+
+1)  Сравните группы (переменная **Category**) по каждой переменной (как количественной, так и категориальной). Для каждой переменной выберите нужный критерий и кратко обоснуйте его выбор в комментариях.
+
+Для переменных, респределение которых можно аппроксимировать нормальным распределением, предлагаю использовать двувыборочный т-теста, а для ненормально распределенных данных предлагаю ипользовать непараметрический аналог, двувыборочный тест Вилкоксона. Таким образом, результаты т-теста можно использовать на "Sodium", "Choline", "Magnesium", "Phosphorus", "Protein", "Vitamin B6", для остальных переменных лучше использовать тест Вилкоксона.
+```{r}
+
+cleaned_data %>%
+  dplyr::select (`Category`, where(is.numeric)) %>%
+  pivot_longer(!Category,names_to = "variables", values_to = "value") %>%
+  group_by(variables) %>%
+  t_test(value ~ Category, p.adjust.method = "holm") %>% 
+  add_significance()
+
+cleaned_data %>%
+  dplyr::select (`Category`, where(is.numeric)) %>%
+  pivot_longer(!Category,names_to = "variables", values_to = "value") %>%
+  group_by(variables) %>%
+  wilcox_test(value ~ Category, p.adjust.method = "holm") %>% 
+  add_significance()
+
+```
+
+
+# Далее идут **необязательные** дополнительные задания, которые могут принести вам дополнительные баллы в том числе в случае ошибок в предыдущих
+
+## Корреляционный анализ
+
+1)  Создайте корреляционную матрицу с визуализацией и поправкой на множественные сравнения. Объясните, когда лучше использовать корреляционные матрицы и в чём минусы и плюсы корреляционных исследований.
+
+С помощью матрица корреляций удобно суммировать корреляции между всеми переменными в наборе данных. Кроме того, удобно использовать для поиска корреляций между переменными, чтобы избежать мультиколлинеарности при построении регрессии. Позволяет оценить силу связи между перемнными. Однако есть и недостатки, которые надо учитывать, так корреляция не позволяет оценить нелинейную зависимость, не показывает как из перемнных влияет на другую, не означает каузальность между переменными.
+
+```{r}
+
+cleaned_data_cor <- 
+  cleaned_data[, -c(1:3)] %>% 
+  psych::corr.test(adjust = "holm")
+  corrplot(corr = cleaned_data_cor$r,
+         p.mat = cleaned_data_cor$p,
+         method = "color",
+         order = "hclust")
+```
+
+## Моделирование
+
+1)  Постройте регрессионную модель для переменной **Category**. Опишите процесс построения
+
+Для построения модели будет использоваться GLM модель на бинарных данных. Для этого произвально присвоим "Rice" и "Cookie" номера 0 и 1. После этого можем построить модель, где Category будет переменной отклика, а остальные переменных датасета могут выступать в качестве предикторов. Однако я буду использовать только переменные, распределения которых можно аппроксимировать нормальным расспредлением ориентируясь на QQplot. Следующими этапами будет проверка на мультиколлинеарность и избыточность дисперсии. Мультиколлинеарность будем оценивать по корреляционной матрице выше и с помощью функции vif(), избытчность дисперсии будет оцениваться пользовательской функцией. Дальнейшая селекция модели будет проводиться с помощью критерия AIC, для его минимизации, после чего модель будет считаться готовой.
+```{r}
+
+cleaned_data$Category <- 
+  cleaned_data$Category %>% 
+  as.character()
+cleaned_data$Category <- 
+  ifelse(test = cleaned_data$Category == "Rice", yes = 1,  no = 0) %>% 
+  as.numeric()
+
+#Mодель
+food_mod <- glm(Category ~Calcium +Sodium+`Vitamin K`+`Vitamin B6`+`Vitamin A and RAE`+ Choline+Selenium+Potassium+`Saturated Fat`+Protein+Copper+Iron+Phosphorus, family = binomial(link = 'logit'), data = cleaned_data)
+
+#Селекция
+drop1(food_mod, test="Chisq")
+vif(food_mod)
+
+food_mod1 <- glm(Category ~Sodium+Protein+Copper+Iron, family = binomial(link = 'logit'), data = cleaned_data)
+drop1(food_mod1, test="Chisq")
+vif(food_mod1)
+
+#Проверка на избыточную дисперсию
+overdisp_fun <- function(model) {
+  rdf <- df.residual(model)  # Число степеней свободы N - p
+  if (any(class(model) == 'negbin')) rdf <- rdf - 1 ## учитываем k в NegBin GLMM
+  rp <- residuals(model,type='pearson') # Пирсоновские остатки
+  Pearson.chisq <- sum(rp^2) # Сумма квадратов остатков, подчиняется Хи-квадрат распределению
+  prat <- Pearson.chisq/rdf  # Отношение суммы квадратов остатков к числу степеней свободы
+  pval <- pchisq(Pearson.chisq, df=rdf, lower.tail=FALSE) # Уровень значимости
+  c(chisq=Pearson.chisq,ratio=prat,rdf=rdf,p=pval)        # Вывод результатов
+}
+overdisp_fun(food_mod1)
+```
