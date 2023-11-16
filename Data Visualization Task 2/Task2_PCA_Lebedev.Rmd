@@ -1,0 +1,186 @@
+---
+title: "PCA_Lebedev"
+author: "Ivan Lebedev"
+date: "`r Sys.Date()`"
+output: 
+  html_document:
+    keep_md: true
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+library(tidyverse)
+library(ggplot2)
+library(ggpubr)
+library(plotly)
+library(rstatix)
+library(corrplot)
+library(ggpubr)
+library(GGally)
+library(factoextra)
+library(pheatmap)
+library(FactoMineR)
+library(ggbiplot)
+library(tidymodels)
+library(embed)
+```
+
+## Данные
+
+```{r, message=FALSE,warning=FALSE}
+life_ex <- readRDS('life_expectancy_data.RDS')
+str(life_ex)
+```
+
+## Plotly график количества городского населения по странам
+
+```{r, message=FALSE,warning=FALSE}
+urb_viz <- 
+  life_ex %>% 
+  ggplot(aes(x = Country, y = `Urban population`, fill  = continent)) +
+  facet_wrap(~continent)+
+  geom_col() +
+  theme(axis.text.x =element_blank())
+ggplotly(urb_viz)
+```
+
+## Plotly график количества деревенского населения по странам
+
+
+```{r, message=FALSE,warning=FALSE}
+rur_viz <- 
+  life_ex %>% 
+  ggplot(aes(x = Country, y = `Rural population`, fill  = continent)) +
+  facet_wrap(~continent)+
+  geom_col() +
+  theme(axis.text.x = element_blank())
+ggplotly(rur_viz)
+```
+
+## T-тест на сравнение распределений `Life expectancy` между группами стран Африки и Америки. 
+
+```{r, message=FALSE,warning=FALSE}
+ggqqplot(life_ex, x = "Life expectancy", facet.by = "continent")
+stat.test <- 
+  life_ex %>% 
+  filter(continent == c("Africa", "Americas")) %>% 
+  rstatix::t_test(`Life expectancy` ~ continent) %>% 
+  add_xy_position(x = "continent")
+stat.test
+
+life_ex %>% 
+  filter(continent == c("Africa", "Americas")) %>% 
+  ggboxplot(
+  y = "Life expectancy",
+  x = "continent",
+  ylab = "Ожидаемая продолжительность жизни", 
+  xlab = "Континент", 
+  add = "jitter"
+  ) + 
+  labs(subtitle = get_test_label(stat.test, detailed = TRUE)) + 
+  stat_pvalue_manual(stat.test, tip.length = 0) 
+```
+
+## Корреляционный анализ
+
+```{r, message=FALSE,warning=FALSE}
+new_life_ex <- 
+  life_ex %>% 
+  select(where(is.numeric) | where(is.integer)) %>% 
+  select(-Year)
+new_life_ex_cor <- cor(new_life_ex)
+corrplot(corr = new_life_ex_cor,
+         method = "color",
+         order = "hclust",
+         tl.cex = 0.5)
+ggcorr(new_life_ex, 
+       label = T, 
+       label_size = 2, 
+       label_round = 1, 
+       geom = "circle",
+       size = 2,
+       hjust = 0.5,
+       angle = -30)
+```
+
+## Heatmap и иерархическая кластеризация
+
+Мной было предположено, что количество кластеров может быть 5 по числу рассматриваемых континентов, поскольку это во многом определяет уровень медицины, экокномическое развитие, климатические условия и так далее. Кластеризация была проведена по строкам и по колонкам, для каждого из 5 кластеров можно сделать вывод какие переменные отличают его среди других кластеров, а также можно сделать выводы о коллинеарности части переменных, подобно корреляции. Первый кластер включает в себя небольшое количество наблюдений и для него характерны наиболее низкие значения по Measles, DPT и HepB3 Immunization. Для второго кластера, по сравнению со всеми остальными, характерны высокие значения Mortality caused by road traffic injury, Tuberculosis Incidence, Infant Mortality. Третий кластер самый малочисленный, но выделяется высокими значениями скоррелированных GDP и GNI. Четвертый кластер имеет наиболее низкие значения Mortality caused by road traffic injury, Tuberculosis Incidence, Infant Mortality, но высокие Clean fuels and cooking technologies, Per Capita, Urban population.
+
+```{r, message=FALSE,warning=FALSE}
+new_life_ex_scaled <- scale(new_life_ex)
+pheatmap(new_life_ex_scaled, 
+         show_rownames = FALSE, 
+         clustering_distance_rows = "euclidean",
+         clustering_method = "ward.D2", 
+         cutree_rows = 5,
+         cutree_cols = length(colnames(new_life_ex_scaled)),
+         angle_col = 45, 
+         main = "Dendrograms for clustering rows and columns with heatmap")
+```
+
+## PCA анализ
+
+Проводим метод главных компонент и визуализируем Cumulative Proportion, видим, что первая главная компонента отвечает за наибольшую дисперсию в наблюдениях. Выбираем первые две компаненты для визуализации и смотрим с какими переменными свазаны наши главные оси. С точки зрения вариации наиболее значимы переменные Life expectancy и Measles, DPT и HepB3 Immunization, причем Life expectancy сильно связана с PC1, что видно по углу наклона, то есть наблюдения с высоким Life expectancy будут лежать в положительной части PC1. Measles, DPT и HepB3 Immunization связаны как с PC1, так и с PC2, при этом Measles, DPT и HepB3 Immunization прямо пропорциональны PC1 и обратно пропорциональны PC2, то есть наблюдения с высокми значениями по Measles, DPT и HepB3 Immunization будут лежать в 4 четверти координатной плоскости. Если смотреть на то, какие переменные вносят наибольший вклад в PC1 и PC2, то в случае PC1 это Life expectancy, Infant Mortality, Basic sanitation services, Clean fuels and cooking technologies, в случае PC2 это Measles, DPT и HepB3 Immunization.
+
+```{r, message=FALSE,warning=FALSE}
+new_life_ex.pca <- prcomp(new_life_ex, 
+                          scale = T)
+
+summary(new_life_ex.pca)
+fviz_eig(new_life_ex.pca, addlabels = T)
+fviz_pca_var(new_life_ex.pca, col.var = "contrib")
+fviz_pca_var(new_life_ex.pca, 
+             select.var = list(contrib = 4),
+             col.var = "contrib")
+fviz_contrib(new_life_ex.pca, choice = "var", axes = 1, top = 24)
+fviz_contrib(new_life_ex.pca, choice = "var", axes = 2, top = 24)
+```
+
+## PCA визуализация
+
+На данном биплоте мы можем проанализировать где наши наблюдения находятся в новой координатной плоскости, а также понять какие для них характерны значения по тем или иным переменным, основываясь на том, как переменные соотносятся с главными компонентами. Проведя визуализацию наблюдений цветом по континентам, мы в целом можем сделать выводы насколько различаются и различаются ли вообще наблюдения по странам с одного континента. В данном случаем мы видим плотно сгруппированные кластеры наблюдений по Европе и Америке, которые при этом не сильно различаются между собой, а также кластер Африканских стран, который размазан больше, но при этом достаточно отделяется от других кластеров. Наблюдения из Азии и Океании плохо разделяются на кластеры и отдельные наблюдения достаточно сильно отдалены друг от друга, что говорит о то, что часть стран по разным переменным схожа с Африканскими странами, а часть с Европой/Америкой.
+
+```{r, message=FALSE,warning=FALSE}
+pca_life_ex <- as.data.frame(new_life_ex.pca$x)
+
+bip_life_ex <- 
+  ggbiplot(new_life_ex.pca,
+           scale=F,
+           labels = F,
+           groups = as.factor(life_ex$continent), 
+           ellipse = T,
+           alpha = 0,
+           varname.abbrev = T)
+bip_life_ex <- 
+  bip_life_ex + 
+  geom_point(data = pca_life_ex, 
+                    aes(x = PC1, 
+                        y = PC2, 
+                        color = life_ex$continent, 
+                        text = life_ex$Country, alpha = 0.5)) +
+  labs(color = "Continent")
+
+ggplotly(bip_life_ex, tooltip = c("text"))
+```
+
+## UMAP
+
+Несмотря на другое располжение наблюдений на кординатной плоскости методом UMAP относительно PCA, тенденция разделения наблюдений на группы по континентам схожая, хорошо выделяется кластер наблюдений стран Европа/Америка, а также дасточно сильно удаленный от них кластер стран Африки, страны Океании и Азии попадают как в Африканский кластер, так и кластер Европа/Америка, что объясняется тем, что условия в данных странах могут быть приближены, как к странам Африки, так и к странам Европы/Америки, что во многом связано и с многочисленностью стран в данных регионах и значительной географической протяженностью данных континентов.
+
+```{r, message=FALSE,warning=FALSE}
+umap_prep <- recipe(~., data = new_life_ex) %>% 
+  step_normalize(all_predictors()) %>%
+  step_umap(all_predictors()) %>%
+  prep() %>%
+  juice()
+
+umap_prep %>%
+  ggplot(aes(UMAP1, UMAP2)) +
+  geom_point(aes(color = as.factor(life_ex$continent)),
+             alpha = 0.7, size = 2) +
+  labs(color = NULL)
+```
+
+
+
